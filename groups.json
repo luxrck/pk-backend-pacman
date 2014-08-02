@@ -1,0 +1,87 @@
+{
+    "desktop-gnome": [
+        "gnome",
+        "gnome-extra"
+    ],
+    "desktop-kde": [
+        "kde",
+        "kde-meta",
+        "kde-telepathy",
+        "kdeaccessibility",
+        "kdeadmin",
+        "kdeartwork",
+        "kdebase",
+        "kdeedu",
+        "kdegames",
+        "kdegraphics",
+        "kdemultimedia",
+        "kdenetwork",
+        "kdepim",
+        "kdeplasma-addons",
+        "kdesdk",
+        "kdetoys",
+        "kdeutils",
+        "kdewebdev",
+        "kf5",
+        "kf5-aids",
+        "plasma-next",
+        "qtcurve"
+    ],
+    "desktop-other": [
+        "gnustep-core",
+        "i3",
+        "lxde",
+        "mate",
+        "mate-extra",
+        "xorg",
+        "xorg-apps",
+        "xorg-drivers"
+    ],
+    "desktop-xfce": [
+        "xfce4",
+        "xfce4-goodies"
+    ],
+    "fonts": [
+        "xorg-fonts"
+    ],
+    "multimedia": [
+        "dssi-plugins",
+        "gstreamer0.10-plugins",
+        "ladspa-plugins",
+        "lv2-plugins",
+        "tesseract-data"
+    ],
+    "office": [
+        "calligra",
+        "libreoffice",
+        "libreoffice-extensions"
+    ],
+    "other": [
+        "fcitx-im",
+        "firefox-addons",
+        "fprint",
+        "multilib-devel",
+        "telepathy",
+        "texlive-lang",
+        "texlive-most",
+        "vim-plugins"
+    ],
+    "programming": [
+        "base-devel",
+        "dlang",
+        "dlang-dmd",
+        "dlang-gdc",
+        "dlang-ldc",
+        "gambas3",
+        "kdebindings",
+        "mingw-w64",
+        "mingw-w64-bootstrap",
+        "mingw-w64-toolchain",
+        "qt",
+        "qt5"
+    ],
+    "system": [
+        "base",
+        "linux-tools"
+    ]
+}
