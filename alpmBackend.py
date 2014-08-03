@@ -25,7 +25,7 @@ __author__ = 'ck Lux <lux.r.ck@gmail.com>'
 import json
 from packagekit.backend import *
 from packagekit.enums import *
-import pyalpm
+from pyalpm import *
 from pacman import *
 import sys
 import time
@@ -218,22 +218,41 @@ class PackageKitPacmanBackend(PackageKitBaseBackend, Pacman):
         self.cache().refresh(force)
 
     # Don't support transaction_flags...
-    @backend(flags={'status':STATUS_RUNNING, 'allow_cancel':False})
-    def install_packages(self, flags, pids):
-        c = self.cache()
-        pkgs = []
-        try:
-            for pid in pids:
-                pn, pv, pa, pi = pid.split(';')
-                pk = c.repo(pi).first(pn,[('=',pv)])
+    def trans(func):
+        def _trans(self, flags, pids, *args, **kwargs):
+            c = self.cache()
+            pkgs = []
+            try:
+                for pid in pids:
+                    pn, pv, pa, pi = pid.split(';')
+                    pk = c.repo(pi).first(pn,[('=',pv)])
                 if not pk:
-                    raise 'Error'
+                    raise Exception
                 pkgs.append(pk)
-        except:
-            self.error(ERROR_INTERNAL_ERROR, "could not find %s" % pid)
+            except Exception as e:
+                self.error(ERROR_PACKAGE_NOT_FOUND, 'Error, could not find %s' % pid)
+                return
+            c0 = TRANSACTION_FLAG_ONLY_TRUSTED in flags and False
+            c1 = TRANSACTION_FLAG_SIMULATE in flags
+            func(self, c0, c1, pkgs, *args, **kwargs)
+        return _trans
+
+    @backend(flags={'status':STATUS_RUNNING, 'allow_cancel':False})
+    @trans
+    def install_packages(self, only_trusted, simulate, pkgs):
+        self.status(STATUS_INSTALL)
+        lo = self.cache().local()
+        if simulate:
+            for pkg in pkgs:
+                if lo.first(pkg.name):
+                    self.error(ERROR_PACKAGE_ALREADY_INSTALLED, "package '%s' is already installed" % self.pid(pkg))
+                    pkgs.remove(pkg)
+                    continue
+                deps = [pkg] + self.calc_dependson(pkg, True)
+                for p in deps:
+                    if p.db.name != 'local':
+                        self.package(p, INFO_INSTALLING)
             return
-        #c0 = TRANSACTION_FLAG_ONLY_TRUSTED in flags and False
-        #c1 = TRANSACTION_FLAG_ONLY_DOWNLOAD in flags
         self.install(pkgs)
 
 #    def install_signature(self, sigtype, key_id, package_id):
@@ -249,40 +268,46 @@ class PackageKitPacmanBackend(PackageKitBaseBackend, Pacman):
             self.package(pkg)
 
     @backend(flags={'status':STATUS_RUNNING, 'allow_cancel':False})
-    def remove_packages(self, flags, pids, allowdep, autoremove):
-        l = self.cache().local()
-        pkgs = []
-        print(flags, allowdep, autoremove, pids)
-        try:
-            for pid in pids:
-                pn, pv, pa, pi = pid.split(';')
-                pk = l.first(pn)
-                if not pk:
-                    raise 'Error'
-                pkgs.append(pk)
-        except:
-            self.error(ERROR_INTERNAL_ERROR, "could not find %s" % pid)
+    @trans
+    def remove_packages(self, only_trusted, simulate, pkgs, allowdeps, autoremove):
+        def unneeded(pkgs, blacklist):
+            for pkg in pkgs:
+                rd = set(pkg.compute_requiredby())
+                rd.difference_update(blacklist)
+                if not len(rd) and pkg.reason == PKG_REASON_DEPEND:
+                    yield pkg
+        self.status(STATUS_REMOVE)
+        lo = self.cache().local()
+        for pkg in pkgs:
+            if pkg.db.name != 'local':
+                self.error(ERROR_PACKAGE_NOT_INSTALLED, "package '%s' is not installed" % self.pid(pkg))
+                pkgs.remove(pkg)
+                continue
+        if simulate:
+            rdeps = set()
+            rdeps = rdeps.union(set([pkg] + self.calc_requiredby(pkg, True)))
+            if allowdeps:
+                ddeps = []
+                blacklist = set([p.name for p in rdeps])
+                for dep in rdeps:
+                    ddeps += list(unneeded(self.calc_dependson(dep, False), blacklist))
+                rdeps = rdeps.union(ddeps)
+            for p in rdeps:
+                if p.db.name == 'local':
+                    self.package(p, INFO_REMOVING)
             return
-        #c0 = TRANSACTION_FLAG_ONLY_TRUSTED in flags and False
-        #c1 = TRANSACTION_FLAG_ONLY_DOWNLOAD in flags
         self.remove(pkgs, {'recurse':allowdep})
 
     @backend(flags={'status':STATUS_RUNNING, 'allow_cancel':False})
-    def update_packages(self, flags, pids):
-        c = self.cache()
-        pkgs = []
-        try:
-            for pid in pids:
-                pn, pv, pa, pi = pid.split(';')
-                pk = c.first(pn,[('=',pv)])
-                if not pk:
-                    raise 'Error'
-                pkgs.append(pk)
-        except:
-            self.error(ERROR_INTERNAL_ERROR, "could not find %s" % pid)
+    @trans
+    def update_packages(self, only_trusted, simulate, pkgs):
+        self.status(STATUS_UPDATE)
+        co = self.cache()
+        if simulate:
+            for pkg in pkgs:
+                if vercmp(co.newest(pkg).version, pkg.version) > 0:
+                    self.package(pkg, INFO_UPDATING)
             return
-        #c0 = TRANSACTION_FLAG_ONLY_TRUSTED in flags and False
-        #c1 = TRANSACTION_FLAG_ONLY_DOWNLOAD in flags
         self.update(pkgs)
 
     @backend(flags={'status':STATUS_INFO, 'allow_cancel':True})
@@ -337,27 +362,35 @@ class PackageKitPacmanBackend(PackageKitBaseBackend, Pacman):
             self.repo_detail(db.name, db.name, True)
 
 #    def repo_signature_install(self, package_id):
+
     @backend(flags={'status':STATUS_RUNNING, 'allow_cancel':False})
     def download_packages(self, directory, pids):
-        c = self.cache()
+        self.status(STATUS_DOWNLOAD)
+        co = self.cache()
         pkgs = []
         try:
             for pid in pids:
                 pn, pv, pa, pi = pid.split(';')
-                pk = c.first(pn,[('=',pv)])
+                if pi == 'local':
+                    raise Exception
+                pk = co.repo(pi).first(pn,[('=',pv)])
                 if not pk:
-                    raise 'Error'
+                    raise Exception
                 pkgs.append(pk)
-        except:
-            self.error(ERROR_INTERNAL_ERROR, "could not find %s" % pid)
+        except Exception as e:
+            self.error(ERROR_PACKAGE_NOT_FOUND, 'Error, cound not find %s' % pid)
             return
-        #c0 = TRANSACTION_FLAG_ONLY_TRUSTED in flags and False
-        #c1 = TRANSACTION_FLAG_ONLY_DOWNLOAD in flags
+        if not directory:
+            directory = os.getcwd()
         if not os.access(directory, os.W_OK):
             self.error(ERROR_INTERNAL_ERROR, "directory '%s' isn't writable'" % directory)
             return
         flags = {'directory': directory}
         self.download(pkgs, flags)
+        for pkg in pkgs:
+            pname = '-'.join((pkg.name, pkg.version, pkg.arch)) + '.tar.xz'
+            self.files(pname, os.path.abspath(directory) + '/' + pname)
+
 #    def set_locale(self, code):
 #    def get_categories(self):
 #    def repair_system(self, transaction_flags):

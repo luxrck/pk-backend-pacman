@@ -156,7 +156,7 @@ class PkgCache(object):
             if db.name == repo:
                 c.repos = [db]
                 break
-        return self
+        return c
 
     def newest(self, key):
         if not type(key) == Package:
@@ -327,7 +327,6 @@ class Pacman(object):
         def _transaction(func):
             def commit(self, pkgs, cflags=dict()):
                 tr = func(self.handle, cflags)
-                print(pkgs,cflags,tr,self.handle.cachedirs)
                 try:
                     trans = self.handle.init_transaction(**tr['flags'])
                     for pkg in pkgs:
@@ -372,7 +371,7 @@ class Pacman(object):
             trans.add_pkg(pkg)
         if 'directory' in cflags.keys():
             handle.cachedirs = [cflags['directory']]
-        return {'flags':{'force':True, 'downloadonly':True}, 'action':_cmd}
+        return {'flags':{'force':True, 'nodeps':True, 'downloadonly':True}, 'action':_cmd}
 
 '''
 def cb(fn):
