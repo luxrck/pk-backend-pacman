@@ -30,7 +30,7 @@
 
 static PkBackendSpawn *spawn;
 
-static const gchar* BACKEND_FILE = "aptBackend.py";
+static const gchar* BACKEND_FILE = "alpmBackend.py";
 
 /**
  * pk_backend_start_job:
@@ -44,23 +44,6 @@ pk_backend_start_job (PkBackend *backend, PkBackendJob *job)
 					   "spawned backend requires lock");
 		return;
 	}
-}
-
-/**
-  * pk_backend_stderr_cb:
-  */
-static gboolean
-pk_backend_stderr_cb (PkBackend *backend, const gchar *output)
-{
-	// APT is a little bit chatty on stderr
-	if (strstr (output, "W:") != NULL)
-		return FALSE;
-	if (strstr (output, "E:") != NULL)
-		return FALSE;
-	// There have been a lot of API changes in python-apt recently
-	if (strstr (output, "DeprecationWarning") != NULL)
-		return FALSE;
-	return TRUE;
 }
 
 /**
@@ -79,8 +62,8 @@ pk_backend_initialize (GKeyFile *conf, PkBackend *backend)
 		 "see backends/PORTING.txt for details");
 
 	spawn = pk_backend_spawn_new (conf);
-	pk_backend_spawn_set_filter_stderr (spawn, pk_backend_stderr_cb);
-	pk_backend_spawn_set_name (spawn, "apt");
+	pk_backend_spawn_set_name (spawn, "pacman");
+	pk_backend_spawn_set_allow_sigkill (spawn, TRUE);
 }
 
 /**
@@ -214,11 +197,13 @@ pk_backend_get_update_detail (PkBackend *backend, PkBackendJob *job, gchar **pac
 void
 pk_backend_install_packages (PkBackend *backend, PkBackendJob *job, PkBitfield transaction_flags, gchar **package_ids)
 {
-	gchar *package_ids_temp;
+    gchar *package_ids_temp;
+	gchar *transaction_flags_temp;
 
-	/* send the complete list as stdin */
 	package_ids_temp = pk_package_ids_to_string (package_ids);
-	pk_backend_spawn_helper (spawn, job, BACKEND_FILE, "install-packages", pk_backend_bool_to_string (only_trusted), package_ids_temp, NULL);
+	transaction_flags_temp = pk_transaction_flag_bitfield_to_string (transaction_flags);
+	pk_backend_spawn_helper (spawn, job, BACKEND_FILE, "install-packages", transaction_flags_temp, package_ids_temp, NULL);
+	g_free (transaction_flags_temp);
 	g_free (package_ids_temp);
 }
 
@@ -250,13 +235,15 @@ pk_backend_refresh_cache (PkBackend *backend, PkBackendJob *job, gboolean force)
  * pk_backend_remove_packages:
  */
 void
-pk_backend_remove_packages (PkBackend *backend, PkBackendJob *job, gchar **package_ids, gboolean allow_deps, gboolean autoremove)
+pk_backend_remove_packages (PkBackend *backend, PkBackendJob *job, PkBitfield transaction_flags, gchar **package_ids, gboolean allow_deps, gboolean autoremove)
 {
 	gchar *package_ids_temp;
+	gchar *transaction_flags_temp;
 
-	/* send the complete list as stdin */
 	package_ids_temp = pk_package_ids_to_string (package_ids);
-	pk_backend_spawn_helper (spawn, job, BACKEND_FILE, "remove-packages", pk_backend_bool_to_string (allow_deps), pk_backend_bool_to_string (autoremove), package_ids_temp, NULL);
+	transaction_flags_temp = pk_transaction_flag_bitfield_to_string (transaction_flags);
+	pk_backend_spawn_helper (spawn, job, BACKEND_FILE, "remove-packages", transaction_flags_temp, package_ids_temp, pk_backend_bool_to_string (allow_deps), pk_backend_bool_to_string (autoremove), NULL);
+	g_free (transaction_flags_temp);
 	g_free (package_ids_temp);
 }
 
@@ -327,13 +314,14 @@ void
 pk_backend_update_packages (PkBackend *backend, PkBackendJob *job, PkBitfield transaction_flags, gchar **package_ids)
 {
 	gchar *package_ids_temp;
+	gchar *transaction_flags_temp;
 
-	/* send the complete list as stdin */
 	package_ids_temp = pk_package_ids_to_string (package_ids);
-	pk_backend_spawn_helper (spawn, job, BACKEND_FILE, "update-packages", pk_backend_bool_to_string (only_trusted), package_ids_temp, NULL);
+	transaction_flags_temp = pk_transaction_flag_bitfield_to_string (transaction_flags);
+	pk_backend_spawn_helper (spawn, job, BACKEND_FILE, "update-packages", transaction_flags_temp, package_ids_temp, NULL);
+	g_free (transaction_flags_temp);
 	g_free (package_ids_temp);
 }
-
 
 /**
  * pk_backend_resolve:
