@@ -27,8 +27,6 @@ from pyalpm import *
 from pycman.config import *
 import re
 
-CONF = '/etc/pacman.conf'
-
 def pacman(conf=None):
     config = PacmanConfig(conf)
     handle = config.initialize_alpm()
@@ -96,10 +94,14 @@ class PkgFilter:
         return ou
 
 class PkgCache(object):
-    def __init__(self, handle):
+    def __init__(self, handle, blacklist=[]):
         self.handle = handle
-        self.repos = [handle.get_localdb()] + handle.get_syncdbs()
-        self._trash = []
+        self._local = handle.get_localdb()
+        self.repos = dict()
+        for db in handle.get_syncdbs():
+            self.repos[db.name] = [db, 1]
+        for name in blacklist:
+            self.set(name, False)
 
     def cached(func):
         def _filter(*args, **kwargs):
@@ -113,49 +115,50 @@ class PkgCache(object):
 
     @cached
     def all(self):
-        for db in self.repos:
+        for db in self.dbs():
             for pkg in db.pkgcache:
                 yield pkg
 
     def set(self, rid, enable):
-        def _swp(db, tb):
-            tb[1].append(db)
-            tb[0].remove(db)
-        
-        tb = [self.repos, self._trash]
-        if enable: tb.reverse()
-        for db in tb[0]:
-            if db.name == 'rid':
-                _swp(db, tb)
-                break
+        if rid == 'local':
+            return
+        if rid in self.repos.keys():
+            self.repos[rid][1] = enable
+            return True
+        return False
 
     @cached
     def get(self, key):
-        for db in self.repos:
+        for db in self.dbs():
             pkg = db.get_pkg(key)
-            if not pkg:
-                continue
-            yield pkg
+            if pkg:
+                yield pkg
     
     def dbs(self):
-        return self.repos
+        keys = list(self.repos.keys())
+        keys.sort()
+        dbs = [self.repos[k][0] for k in keys if self.repos[k][1]]
+        if self._local:
+            dbs.insert(0, self._local)
+        return dbs
 
     def local(self):
         c = PkgCache(self.handle)
-        c.repos = self.repos[:1]
+        c.repos = dict()
         return c
     
     def online(self):
-        c = PkgCache(self.handle)
-        c.repos.pop(0)
+        c = PkgCache(self.handle, [v.name for k,v in self.repos.items() if not v[1]])
+        c._local = None
         return c
 
     def repo(self, repo=None):
         c = PkgCache(self.handle)
-        for db in self.repos:
-            if db.name == repo:
-                c.repos = [db]
-                break
+        c.repos = {}
+        if not repo in ('local', 'installed'):
+            c._local = None
+        if repo in self.repos.keys():
+            c.repos = {repo: [self.repos[repo][0], self.repos[repo][1]]}
         return c
 
     def newest(self, key):
@@ -208,7 +211,7 @@ class PkgCache(object):
 
     @cached
     def groups(self, groups):
-        for db in self.repos:
+        for db in self.dbs():
             for grp in groups:
                 pgrp = db.read_grp(grp)
                 if pgrp:
@@ -218,7 +221,7 @@ class PkgCache(object):
     @cached
     def search(self, keys):
         ss = "|".join(keys)
-        for db in self.repos:
+        for db in self.dbs():
             pkgs = db.search(ss)
             if pkgs == []:
                 continue
@@ -390,7 +393,6 @@ p._handle.dlcb = dlcb
 #p._handle.add_cachedir('/home/luxck/')
 #print(p._handle.cachedirs)
 pcm = Pacman('/etc/pacman.conf')
-pk = pcm.cache().online().first('yelp')
 #pcm.download([pk],{'directory':'/home/luxck'})
 #pcm.remove([pk],{'recurse':True})
 #pcm.install([pk])

@@ -5,6 +5,7 @@ helperdir = $(datadir)/PackageKit/helpers/pacman
 dist_helper_DATA = 	\
 	alpmBackend.py	\
 	pacman.py		\
+	pacman.conf		\
 	groups.json
 
 plugindir = $(PK_PLUGIN_DIR)

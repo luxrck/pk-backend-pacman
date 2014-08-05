@@ -31,9 +31,39 @@ import sys
 import time
 import os
 
-sys.path.append('/usr/local/lib/python3.4/site-packages')
-GROUPS = 'groups.json'
+PREFIX = '/usr/local/share/PackageKit/helpers/pacman/'
+GROUPS = PREFIX + 'groups.json'
+BLACKLIST = PREFIX + 'blacklist.json'
+#REPOS = PREFIX + 'repos.json'
+CONF = PREFIX + 'pacman.conf'
 GROUP_MAP = json.load(open(GROUPS, 'r'))
+'''
+class RepoCfg:
+    def __init__(self, cfg):
+        self.cfg = json.load(open(cfg,'r'))
+        self.fp = open(cfg, 'w+')
+        print(self.cfg)
+    def set(self, rid, p, v):
+        if not rid in self.cfg.keys():
+            self.cfg[rid] = dict()
+        self.cfg[rid][p] = v
+    def remove(self, rid):
+        if not rid in self.cfg.keys():
+            return False
+        self.cfg.pop(rid)
+        return True
+    def write(self):
+        json.dump(self.cfg, self.fp)
+
+REPOCFG = RepoCfg(REPOS)
+'''
+def load_blacklist(cache, fl):
+    brepos = json.load(open(fl, 'r'))
+    for repo in brepos['blocked']:
+        cache.set(repo, False)
+
+def update_blacklist(cache, fl):
+    json.dump({'blocked':[v[0].name for k,v in cache.repos.items() if not v[1]]},open(fl, 'w+'))
 
 #
 # Avaliable filters: installed/~installed; newest/~newest; basename/~basename
@@ -43,6 +73,7 @@ class PackageKitPacmanBackend(PackageKitBaseBackend, Pacman):
     def __init__(self, cmds, conf):
         Pacman.__init__(self, conf)
         PackageKitBaseBackend.__init__(self, cmds)
+        load_blacklist(self.cache(), BLACKLIST)
 
     def package(self, pkg, info=None):
         if not info:
@@ -55,7 +86,10 @@ class PackageKitPacmanBackend(PackageKitBaseBackend, Pacman):
     #
 
     def pid(self, pkg):
-        return pkg.name + ';' + pkg.version + ';' + pkg.arch + ';' + pkg.db.name
+        dn = pkg.db.name
+        if dn == 'local':
+            dn = 'installed'
+        return pkg.name + ';' + pkg.version + ';' + pkg.arch + ';' + dn
 
     def pkg(self, pid):
         pn, pv, pa, pi = pid.split(';')
@@ -178,7 +212,7 @@ class PackageKitPacmanBackend(PackageKitBaseBackend, Pacman):
             c = self.cache()
             for pid in pids:
                 try:
-                    pn, pv, pa, pd = pid.split(';')
+                    pn, pv, pa, pi = pid.split(';')
                     pk = c.first(pn, [('=', pv)])
                     if not pk:
                         raise NameError
@@ -240,14 +274,16 @@ class PackageKitPacmanBackend(PackageKitBaseBackend, Pacman):
     @backend(flags={'status':STATUS_RUNNING, 'allow_cancel':False})
     @trans
     def install_packages(self, only_trusted, simulate, pkgs):
+        print(only_trusted, simulate, pkgs, '+++++++++++++++++')
         self.status(STATUS_INSTALL)
         lo = self.cache().local()
+        for pkg in pkgs:
+            if lo.first(pkg.name):
+                self.error(ERROR_PACKAGE_ALREADY_INSTALLED, "package '%s' is already installed" % self.pid(pkg))
+                pkgs.remove(pkg)
+                continue
         if simulate:
             for pkg in pkgs:
-                if lo.first(pkg.name):
-                    self.error(ERROR_PACKAGE_ALREADY_INSTALLED, "package '%s' is already installed" % self.pid(pkg))
-                    pkgs.remove(pkg)
-                    continue
                 deps = [pkg] + self.calc_dependson(pkg, True)
                 for p in deps:
                     if p.db.name != 'local':
@@ -270,6 +306,7 @@ class PackageKitPacmanBackend(PackageKitBaseBackend, Pacman):
     @backend(flags={'status':STATUS_RUNNING, 'allow_cancel':False})
     @trans
     def remove_packages(self, only_trusted, simulate, pkgs, allowdeps, autoremove):
+        print(only_trusted, simulate, pkgs, allowdeps, autoremove,'--------------------')
         def unneeded(pkgs, blacklist):
             for pkg in pkgs:
                 rd = set(pkg.compute_requiredby())
@@ -296,7 +333,7 @@ class PackageKitPacmanBackend(PackageKitBaseBackend, Pacman):
                 if p.db.name == 'local':
                     self.package(p, INFO_REMOVING)
             return
-        self.remove(pkgs, {'recurse':allowdep})
+        self.remove(pkgs, {'recurse':allowdeps})
 
     @backend(flags={'status':STATUS_RUNNING, 'allow_cancel':False})
     @trans
@@ -312,28 +349,36 @@ class PackageKitPacmanBackend(PackageKitBaseBackend, Pacman):
 
     @backend(flags={'status':STATUS_INFO, 'allow_cancel':True})
     def get_details(self, pids):
+        def pk_group(pkg):
+            for k,v in GROUP_MAP.items():
+                if set(pkg.groups).issubset(set(v)):
+                    return k
+            return GROUP_UNKNOWN
         co = self.cache()
         for pid in pids:
             try:
                 pk = self.pkg(pid)
                 if pk:
-                    self.details(pid, pk.license, self.get_group(pk), pk.desc, pk.url, pk.isize)
+                    self.details(pid, ' '.join(pk.licenses), pk_group(pk), pk.desc, pk.url, "", pk.isize)
             except:
-                self.error(ERROR_INTERNAL_ERROR, "could not find %s" % pid)
+                self.error(ERROR_INTERNAL_ERROR, "could not find '%s'" % pid)
 
     @backend(flags={'status':STATUS_INFO, 'allow_cancel':True})
     def get_files(self, pids):
-        co = self.cache().local()
+        lo = self.cache().local()
         for pid in pids:
             try:
-                pk = self.pkg(pid)
+                pn, pv, pa, pi = pid.split(';')
+                pk = lo.first(pn,[('=', pv)])
+                pfl = []
+                for fl in pk.files:
+                    pfl.append(fl[0])
+                self.files(pid, ';'.join(pfl))
+                if not pk:
+                    raise Exception
             except:
-                self.error(ERROR_INTERNAL_ERROR, "could not find %s" % pid)
+                self.error(ERROR_INTERNAL_ERROR, "could not find '%s'" % pid)
                 return
-            pfl = []
-            for fl in pk.files:
-                pfl.append(fl[0])
-            self.file(pid, ';'.join(pfl))
 
     @backend(flags={'status':STATUS_INFO, 'allow_cancel':True})
     def get_updates(self, filters):
@@ -348,18 +393,26 @@ class PackageKitPacmanBackend(PackageKitBaseBackend, Pacman):
 
     @backend(flags={'status':STATUS_INFO, 'allow_cancel':True})
     def repo_enable(self, repoid, enable):
-        if repoid == 'local':
-            self.error(ERROR_INTERNAL_ERROR, "Repo ID '%s' is invalid" % repoid)
+        if repoid == 'core':
+            self.error(ERROR_CANNOT_DISABLE_REPOSITORY, "'core' repo can't be disabled")
             return
-        cself.cache().set(repoid, enable)
+        self.cache().set(repoid, enable)
+        update_blacklist(self.cache(), BLACKLIST)
 
 #    def repo_set_data(self, repoid, parameter, value):
+#        co = self.cache()
+#        for k in [k for k,v in co.repos.items() if not co.repos[k][1]]:
+#            REPOCFG.remove(k)
+#        REPOCFG.set(repoid, parameter, value)
+#        REPOCFG.write()
 
     @backend(flags={'status':STATUS_INFO, 'allow_cancel':True})
     def get_repo_list(self, filters):
         co = self.cache()
-        for db in co.dbs():
-            self.repo_detail(db.name, db.name, True)
+        keys = list(co.repos.keys())
+        keys.sort()
+        for v in [co.repos[key] for key in keys]:
+            self.repo_detail(v[0].name, v[0].name, v[1])
 
 #    def repo_signature_install(self, package_id):
 
@@ -371,8 +424,6 @@ class PackageKitPacmanBackend(PackageKitBaseBackend, Pacman):
         try:
             for pid in pids:
                 pn, pv, pa, pi = pid.split(';')
-                if pi == 'local':
-                    raise Exception
                 pk = co.repo(pi).first(pn,[('=',pv)])
                 if not pk:
                     raise Exception
@@ -388,8 +439,8 @@ class PackageKitPacmanBackend(PackageKitBaseBackend, Pacman):
         flags = {'directory': directory}
         self.download(pkgs, flags)
         for pkg in pkgs:
-            pname = '-'.join((pkg.name, pkg.version, pkg.arch)) + '.tar.xz'
-            self.files(pname, os.path.abspath(directory) + '/' + pname)
+            pname = pkg.filename
+            self.files(self.pid(pkg), os.path.abspath(directory) + '/' + pname)
 
 #    def set_locale(self, code):
 #    def get_categories(self):
