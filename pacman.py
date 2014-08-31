@@ -375,24 +375,3 @@ class Pacman(object):
         if 'directory' in cflags.keys():
             handle.cachedirs = [cflags['directory']]
         return {'flags':{'force':True, 'nodeps':True, 'downloadonly':True}, 'action':_cmd}
-
-'''
-def cb(fn):
-    def _cb(name, trans, tol):
-        if trans - _cb.itrans > 32:
-            fn(name, trans, tol)
-        _cb.itrans = trans
-    _cb.itrans = 0
-def dlcb(name, trans, tol):
-    print(name, trans, tol)
-    itrans = trans
-p._handle.dlcb = dlcb
-'''
-#p.install(li)
-#p._handle.remove_cachedir('/var/cache/pacman/pkg')
-#p._handle.add_cachedir('/home/luxck/')
-#print(p._handle.cachedirs)
-pcm = Pacman('/etc/pacman.conf')
-#pcm.download([pk],{'directory':'/home/luxck'})
-#pcm.remove([pk],{'recurse':True})
-#pcm.install([pk])
