@@ -274,7 +274,6 @@ class PackageKitPacmanBackend(PackageKitBaseBackend, Pacman):
     @backend(flags={'status':STATUS_RUNNING, 'allow_cancel':False})
     @trans
     def install_packages(self, only_trusted, simulate, pkgs):
-        print(only_trusted, simulate, pkgs, '+++++++++++++++++')
         self.status(STATUS_INSTALL)
         lo = self.cache().local()
         for pkg in pkgs:
@@ -306,7 +305,6 @@ class PackageKitPacmanBackend(PackageKitBaseBackend, Pacman):
     @backend(flags={'status':STATUS_RUNNING, 'allow_cancel':False})
     @trans
     def remove_packages(self, only_trusted, simulate, pkgs, allowdeps, autoremove):
-        print(only_trusted, simulate, pkgs, allowdeps, autoremove,'--------------------')
         def unneeded(pkgs, blacklist):
             for pkg in pkgs:
                 rd = set(pkg.compute_requiredby())
